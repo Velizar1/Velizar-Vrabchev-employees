@@ -10,7 +10,7 @@ namespace Employees
             var filename = Console.ReadLine();
             AppController controller = new AppController();
             controller.ExtractDataFromFile(filename);
-            controller.FindLongestCollaboratingEmpleyees();
+            controller.FindLongestCollaboratingEmployees();
         }
     }
 }

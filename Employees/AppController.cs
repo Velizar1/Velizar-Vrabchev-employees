@@ -34,76 +34,93 @@ namespace Employees
             }
 
         }
-        public void FindLongestCollaboratingEmpleyees()
+        public void FindLongestCollaboratingEmployees()
         {
-            Dictionary<(int empId1, int empId2, int projId), TimeSpan> result = WorkingHoursOfEachPairOfEmployeesWithTheSameProjects();
+            Dictionary<EmployeeKeyPair, TimeSpan> result = WorkingHoursOfEachPairOfEmployeesWithTheSameProjects();
 
             int firstEmpId, secondEmpId;
             decimal maxTimeWorkedTogether;
             try
             {
                 var longestCoworkers = result
-                   .GroupBy(g => new
-                   {
-                       g.Key.empId1,
-                       g.Key.empId2,
-                   })
-                   .Select(x => new
-                   {
-                       x.Key.empId1,
-                       x.Key.empId2,
-                       total = (decimal)x.Sum(t => t.Value.TotalSeconds)
-                   })
-                   .OrderByDescending(g => g.total)
-                   .FirstOrDefault();
+                    .Select(kv => new
+                    {
+                        pair = kv.Key,
+                        totalWorkTime = kv.Value.TotalSeconds
+                    })
+                    .OrderByDescending(v => v.totalWorkTime)
+                    .FirstOrDefault();
 
-                (firstEmpId, secondEmpId, maxTimeWorkedTogether) = (longestCoworkers.empId1, longestCoworkers.empId2, longestCoworkers.total);
+                (firstEmpId, secondEmpId, maxTimeWorkedTogether) = (longestCoworkers.pair.EmpId1, longestCoworkers.pair.EmpId2, (decimal)longestCoworkers.totalWorkTime);
                 Console.WriteLine($"{firstEmpId} and {secondEmpId} has worked longer together for : {maxTimeWorkedTogether} seconds");
             }
-            catch (Exception)
+            catch (Exception e)
             {
                 Console.WriteLine("No employees found.");
             }
 
         }
 
-        private Dictionary<(int empId1, int empId2, int projId), TimeSpan> WorkingHoursOfEachPairOfEmployeesWithTheSameProjects()
+        private Dictionary<EmployeeKeyPair, TimeSpan> WorkingHoursOfEachPairOfEmployeesWithTheSameProjects()
         {
-            var result = new Dictionary<(int empId1, int empId2, int projId), TimeSpan>();
-            for (int i = 0; i < Employees.Count - 1; i++)
+            var employeesWhoHadWorkedTogether = new Dictionary<EmployeeKeyPair, TimeSpan>();
+            var joinEmployees = Employees.Join(Employees, e1 => e1.ProjectID, e2 => e2.ProjectID, (e1, e2) =>
+                   {
+                       if (e1.EmpID != e2.EmpID)
+                       {
+                           return new EmployeeTableRow
+                           {
+
+                               ProjectID = e1.ProjectID,
+                               Emp1Id = e1.EmpID,
+                               Emp2Id = e2.EmpID,
+                               FromEmp1 = e1.DateFrom,
+                               ToEmp1 = e1.DateTo,
+                               FromEmp2 = e2.DateFrom,
+                               ToEmp2 = e2.DateTo
+                           };
+                       }
+                       return null;
+                   })
+                .Where(r => r != null)
+                .Distinct(new EmployeeRowComparer())
+                .ToList();
+
+
+            for (int i = 0; i < joinEmployees.Count; i++)
             {
-                for (int j = i + 1; j < Employees.Count; j++)
+                var empOriginalPair = new EmployeeKeyPair()
                 {
+                    EmpId1 = joinEmployees[i].Emp1Id,
+                    EmpId2 = joinEmployees[i].Emp2Id
+                };
+                var empSwitchedPair = new EmployeeKeyPair()
+                {
+                    EmpId2 = joinEmployees[i].Emp1Id,
+                    EmpId1 = joinEmployees[i].Emp2Id
+                };
+                var timeSpendOnProject = GetTimeSpentOnProject(joinEmployees[i].FromEmp1, joinEmployees[i].ToEmp1, joinEmployees[i].FromEmp2, joinEmployees[i].ToEmp2);
+                if (timeSpendOnProject == null)
+                    continue;
 
-                    foreach (var projectId in Employees.Select(e => e.ProjectID))
-                    {
-                        if (Employees[i].EmpID == Employees[j].EmpID)
-                            continue;
-                        var currTuple = (Employees[i].EmpID, Employees[j].EmpID, projectId);
-                        if (result.ContainsKey(currTuple))
-                            continue;
-                        var timeWorkedTogether = GetTimeSpentOnProject(Employees[i].EmpID, Employees[j].EmpID, projectId, Employees);
-
-                        if (timeWorkedTogether == null)
-                            continue;
-                        result[currTuple] = timeWorkedTogether.Value;
-                    }
+                if (employeesWhoHadWorkedTogether.ContainsKey(empOriginalPair))
+                    employeesWhoHadWorkedTogether[empOriginalPair] += (TimeSpan)timeSpendOnProject;
+                else if (employeesWhoHadWorkedTogether.ContainsKey(empSwitchedPair))
+                    employeesWhoHadWorkedTogether[empSwitchedPair] += (TimeSpan)timeSpendOnProject;
+                else
+                {
+                    employeesWhoHadWorkedTogether.Add(empOriginalPair, (TimeSpan)timeSpendOnProject);
                 }
             }
 
-            return result;
+            return employeesWhoHadWorkedTogether;
         }
 
-        private TimeSpan? GetTimeSpentOnProject(int empId1, int empId2, int projId, IEnumerable<Employee> employeeCollection)
+        private TimeSpan? GetTimeSpentOnProject(DateTime firstStart, DateTime firstEnd, DateTime secondStart, DateTime secondEnd)
         {
-            var poeopleWhoHaveWorkedOnTheProject = employeeCollection
-                .Where(e => e.ProjectID == projId);
-            var firstPerson = poeopleWhoHaveWorkedOnTheProject.FirstOrDefault(p => p.EmpID == empId1);
-            var secondPerson = poeopleWhoHaveWorkedOnTheProject.FirstOrDefault(p => p.EmpID == empId2);
-            if (firstPerson == null || secondPerson == null)
-                return null;
-            var biggerStart = new DateTime(Math.Max(firstPerson.DateFrom.Ticks, secondPerson.DateFrom.Ticks));
-            var smallerEnd = new DateTime(Math.Min(firstPerson.DateTo.Ticks, secondPerson.DateTo.Ticks));
+
+            var biggerStart = new DateTime(Math.Max(firstStart.Ticks, secondStart.Ticks));
+            var smallerEnd = new DateTime(Math.Min(firstEnd.Ticks, secondEnd.Ticks));
             var workedTime = smallerEnd - biggerStart;
             return workedTime.TotalSeconds < 0 ? (TimeSpan?)null : workedTime;
         }
@@ -123,7 +140,7 @@ namespace Employees
             }
             else
             {
-                Console.WriteLine($"Expected data id([1-9]*), id([1-9]*), date(yyy-mm-dd), date(yyy-mm-dd | NULL). Found : {data}");
+                Console.WriteLine($"Expected data id([1-9]*), id([1-9]*), date(yyy-mm-dd), date(yyyy-mm-dd | NULL). Found : {data}");
             }
         }
 
